@@ -1,0 +1,14 @@
+name: fXChat
+version: 1.61
+main: com.fluxcraft.fXChat.FXChat
+api-version: 1.21
+authors: [FluxCraft]
+folia-supported: true
+commands:
+  fluxchat:
+    description: 重载插件配置
+    usage: /fluxchat reload
+permissions:
+  fluxchat.reload:
+    description: 允许重载插件配置
+    default: op
