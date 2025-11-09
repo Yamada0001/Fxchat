@@ -1,14 +1,22 @@
 name: fXChat
-version: 1.61
+version: √2
 main: com.fluxcraft.fXChat.FXChat
 api-version: 1.21
-authors: [FluxCraft]
+author: FluxCraft
+description: 高级聊天格式插件，支持PAPI变量和Folia/Paper核心
 folia-supported: true
+
 commands:
   fluxchat:
-    description: 重载插件配置
-    usage: /fluxchat reload
+    description: fXChat 管理命令
+    usage: /<command> [reload|info]
+    permission: fxchat.reload
+    aliases: [fchat, fxc]
+
 permissions:
-  fluxchat.reload:
-    description: 允许重载插件配置
+  fxchat.reload:
+    description: 允许重载fXChat配置
     default: op
+  fxchat.info:
+    description: 允许查看插件信息
+    default: true
