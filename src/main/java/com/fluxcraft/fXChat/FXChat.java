@@ -15,6 +15,10 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
+import org.bstats.charts.SingleLineChart;
+
 public final class FXChat extends JavaPlugin implements Listener {
     private String chatFormat;
     private final Map<String, String> biomes = new ConcurrentHashMap<>();
@@ -23,15 +27,17 @@ public final class FXChat extends JavaPlugin implements Listener {
     private FileConfiguration biomeConfig;
     private boolean isFolia = false;
 
+    private Metrics metrics;
+
     @Override
     public void onEnable() {
-        // 检测服务器核心类型
         isFolia = detectFolia();
 
-        // 初始化配置文件
         saveDefaultConfig();
         setupBiomeConfig();
         loadConfig();
+
+        initializeMetrics();
 
         placeholderAPIEnabled = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
         if (placeholderAPIEnabled) {
@@ -51,9 +57,52 @@ public final class FXChat extends JavaPlugin implements Listener {
         getLogger().info("👋 fXChat 插件已禁用");
     }
 
-    /**
-     * 检测是否为 Folia 核心
-     */
+    private void initializeMetrics() {
+        try {
+            int pluginId = 27914;
+
+            metrics = new Metrics(this, pluginId);
+
+            addCustomCharts();
+
+            getLogger().info("📊 bStats 统计功能已启用");
+        } catch (Exception e) {
+            getLogger().warning("📊 bStats 统计初始化失败: " + e.getMessage());
+        }
+    }
+
+    private void addCustomCharts() {
+        if (metrics == null) return;
+
+        metrics.addCustomChart(new SimplePie("server_core", () ->
+                isFolia ? "Folia" : "Paper"
+        ));
+
+        metrics.addCustomChart(new SimplePie("placeholderapi_enabled", () ->
+                placeholderAPIEnabled ? "已启用" : "未启用"
+        ));
+
+        metrics.addCustomChart(new SingleLineChart("biome_config_count", () ->
+                biomes.size()
+        ));
+
+        metrics.addCustomChart(new SimplePie("server_version", () -> {
+            String version = Bukkit.getVersion();
+            if (version.contains("1.21")) return "1.21.x";
+            if (version.contains("1.20")) return "1.20.x";
+            return "其他版本";
+        }));
+
+        metrics.addCustomChart(new SimplePie("online_players_range", () -> {
+            int online = Bukkit.getOnlinePlayers().size();
+            if (online == 0) return "0";
+            if (online <= 10) return "1-10";
+            if (online <= 50) return "11-50";
+            if (online <= 100) return "51-100";
+            return "100+";
+        }));
+    }
+
     private boolean detectFolia() {
         try {
             Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
@@ -63,9 +112,6 @@ public final class FXChat extends JavaPlugin implements Listener {
         }
     }
 
-    /**
-     * 设置生物群系配置文件
-     */
     private void setupBiomeConfig() {
         biomeFile = new File(getDataFolder(), "biome.yml");
         if (!biomeFile.exists()) {
@@ -74,23 +120,17 @@ public final class FXChat extends JavaPlugin implements Listener {
         biomeConfig = YamlConfiguration.loadConfiguration(biomeFile);
     }
 
-    /**
-     * 加载所有配置
-     */
     public void loadConfig() {
         reloadConfig();
         FileConfiguration config = getConfig();
 
-        // 重新加载生物群系配置
         biomeConfig = YamlConfiguration.loadConfiguration(biomeFile);
 
-        // 加载聊天格式
         String rawFormat = config.getString("chat-format", "[%player_name%] %message%");
         chatFormat = ChatColor.translateAlternateColorCodes('&', rawFormat);
 
         biomes.clear();
 
-        // 从 biome.yml 加载生物群系配置
         if (biomeConfig.getConfigurationSection("biomes") != null) {
             for (String biome : biomeConfig.getConfigurationSection("biomes").getKeys(false)) {
                 String biomeName = biomeConfig.getString("biomes." + biome);
@@ -103,9 +143,6 @@ public final class FXChat extends JavaPlugin implements Listener {
         getLogger().info("📊 已加载 " + biomes.size() + " 个生物群系配置");
     }
 
-    /**
-     * 保存生物群系配置
-     */
     public void saveBiomeConfig() {
         try {
             biomeConfig.save(biomeFile);
@@ -121,18 +158,14 @@ public final class FXChat extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         String message = event.getMessage();
 
-        // 取消原版消息
         event.setCancelled(true);
 
-        // 格式化消息
         String formatted = formatMessage(player, message);
 
-        // 发送消息
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
             onlinePlayer.sendMessage(formatted);
         }
 
-        // 控制台也显示
         Bukkit.getConsoleSender().sendMessage(formatted);
     }
 
@@ -156,7 +189,6 @@ public final class FXChat extends JavaPlugin implements Listener {
 
         String result = biomes.get(biomeKey.toUpperCase());
         if (result == null) {
-            // 美化原版生物群系名称
             return "§7" + biomeKey.toLowerCase().replace("_", " ");
         }
         return result;
