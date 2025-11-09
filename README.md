@@ -131,6 +131,6 @@ if (isFolia) {
 *✨ 为现代 Minecraft 服务器而生*
 
 效果图
-![草原](.\png\1.png)
+![草原](png/1.png)
 
-![房屋](.\png\2.png)
+![房屋](png/2.png)
