@@ -1,6 +1,5 @@
 package com.fluxcraft.fXChat;
 
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -53,7 +52,9 @@ public class ReloadCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        plugin.loadConfig();
+        plugin.getConfigManager().reloadConfigs();
+        plugin.loadBiomes();
+
         sender.sendMessage("§a✅ 配置文件已成功重载！");
     }
 
@@ -61,6 +62,17 @@ public class ReloadCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§b📋 " + plugin.getPluginInfo());
         sender.sendMessage("§7PlaceholderAPI 支持: " +
                 (plugin.isPlaceholderAPIEnabled() ? "§a已启用" : "§c未启用"));
+        sender.sendMessage("§7bStats 统计: " + (plugin.getConfigManager().isUseBstats() ? "§a已启用" : "§c已禁用"));
+        sender.sendMessage("§7使用 Bukkit 广播API: " + (plugin.getConfigManager().isUseBukkitApi() ? "§a是" : "§c否"));
+
+        int biomeCount = 0;
+        if (plugin.getConfigManager().getBiomeConfig().getConfigurationSection("biomes") != null) {
+            biomeCount = plugin.getConfigManager().getBiomeConfig().getConfigurationSection("biomes").getKeys(false).size();
+        }
+        sender.sendMessage("§7生物群系配置数量: §e" + biomeCount);
+
+        sender.sendMessage("§7服务器核心类型: §e" + (plugin.isFolia() ? "Folia" : "Paper"));
+        sender.sendMessage("§7在线玩家数: §e" + org.bukkit.Bukkit.getOnlinePlayers().size());
     }
 
     @Override

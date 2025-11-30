@@ -1,9 +1,6 @@
 package com.fluxcraft.fXChat;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -11,38 +8,44 @@ import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bstats.charts.SingleLineChart;
 
 public final class FXChat extends JavaPlugin implements Listener {
-    private String chatFormat;
     private final Map<String, String> biomes = new ConcurrentHashMap<>();
     private boolean placeholderAPIEnabled;
-    private File biomeFile;
-    private FileConfiguration biomeConfig;
     private boolean isFolia = false;
-
     private Metrics metrics;
+    private ExecutorService messageExecutor;
+    private ScheduledExecutorService autoReloadExecutor;
+    private ConfigManager configManager;
+    private long lastConfigModified;
+    private long lastBiomeModified;
 
     @Override
     public void onEnable() {
         isFolia = detectFolia();
+        messageExecutor = Executors.newFixedThreadPool(2);
+        configManager = new ConfigManager(this);
+        configManager.loadConfigs();
+        loadBiomes();
+        startAutoReloadTimer();
 
-        saveDefaultConfig();
-        setupBiomeConfig();
-        loadConfig();
-
-        initializeMetrics();
+        if (configManager.isUseBstats()) {
+            initializeMetrics();
+        }
 
         placeholderAPIEnabled = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
         if (placeholderAPIEnabled) {
             new BiomePlaceholder(this).register();
-            getLogger().info("✨ 已成功注册 PlaceholderAPI 扩展");
         }
 
         getCommand("fluxchat").setExecutor(new ReloadCommand(this));
@@ -54,45 +57,36 @@ public final class FXChat extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (messageExecutor != null) {
+            messageExecutor.shutdown();
+        }
+        if (autoReloadExecutor != null) {
+            autoReloadExecutor.shutdown();
+        }
         getLogger().info("👋 fXChat 插件已禁用");
     }
 
     private void initializeMetrics() {
         try {
             int pluginId = 27914;
-
             metrics = new Metrics(this, pluginId);
-
             addCustomCharts();
-
-            getLogger().info("📊 bStats 统计功能已启用");
         } catch (Exception e) {
-            getLogger().warning("📊 bStats 统计初始化失败: " + e.getMessage());
+            getLogger().severe("📊 bStats 统计初始化失败: " + e.getMessage());
         }
     }
 
     private void addCustomCharts() {
         if (metrics == null) return;
-
-        metrics.addCustomChart(new SimplePie("server_core", () ->
-                isFolia ? "Folia" : "Paper"
-        ));
-
-        metrics.addCustomChart(new SimplePie("placeholderapi_enabled", () ->
-                placeholderAPIEnabled ? "已启用" : "未启用"
-        ));
-
-        metrics.addCustomChart(new SingleLineChart("biome_config_count", () ->
-                biomes.size()
-        ));
-
+        metrics.addCustomChart(new SimplePie("server_core", () -> isFolia ? "Folia" : "Paper"));
+        metrics.addCustomChart(new SimplePie("placeholderapi_enabled", () -> placeholderAPIEnabled ? "已启用" : "未启用"));
+        metrics.addCustomChart(new SingleLineChart("biome_config_count", () -> biomes.size()));
         metrics.addCustomChart(new SimplePie("server_version", () -> {
             String version = Bukkit.getVersion();
             if (version.contains("1.21")) return "1.21.x";
             if (version.contains("1.20")) return "1.20.x";
             return "其他版本";
         }));
-
         metrics.addCustomChart(new SimplePie("online_players_range", () -> {
             int online = Bukkit.getOnlinePlayers().size();
             if (online == 0) return "0";
@@ -112,42 +106,52 @@ public final class FXChat extends JavaPlugin implements Listener {
         }
     }
 
-    private void setupBiomeConfig() {
-        biomeFile = new File(getDataFolder(), "biome.yml");
-        if (!biomeFile.exists()) {
-            saveResource("biome.yml", false);
-        }
-        biomeConfig = YamlConfiguration.loadConfiguration(biomeFile);
-    }
+    private void startAutoReloadTimer() {
+        File configFile = new File(getDataFolder(), "config.yml");
+        File biomeFile = new File(getDataFolder(), "biome.yml");
+        lastConfigModified = configFile.lastModified();
+        lastBiomeModified = biomeFile.lastModified();
 
-    public void loadConfig() {
-        reloadConfig();
-        FileConfiguration config = getConfig();
+        autoReloadExecutor = Executors.newSingleThreadScheduledExecutor();
+        autoReloadExecutor.scheduleAtFixedRate(() -> {
+            long currentConfigModified = configFile.lastModified();
+            long currentBiomeModified = biomeFile.lastModified();
+            boolean needsReload = false;
 
-        biomeConfig = YamlConfiguration.loadConfiguration(biomeFile);
+            if (currentConfigModified > lastConfigModified) {
+                lastConfigModified = currentConfigModified;
+                needsReload = true;
+            }
+            if (currentBiomeModified > lastBiomeModified) {
+                lastBiomeModified = currentBiomeModified;
+                needsReload = true;
+            }
 
-        String rawFormat = config.getString("chat-format", "[%player_name%] %message%");
-        chatFormat = ChatColor.translateAlternateColorCodes('&', rawFormat);
-
-        biomes.clear();
-
-        if (biomeConfig.getConfigurationSection("biomes") != null) {
-            for (String biome : biomeConfig.getConfigurationSection("biomes").getKeys(false)) {
-                String biomeName = biomeConfig.getString("biomes." + biome);
-                if (biomeName != null) {
-                    biomes.put(biome.toUpperCase(), ChatColor.translateAlternateColorCodes('&', biomeName));
+            if (needsReload) {
+                if (isFolia) {
+                    getServer().getGlobalRegionScheduler().run(this, scheduledTask -> {
+                        configManager.reloadConfigs();
+                        loadBiomes();
+                    });
+                } else {
+                    getServer().getScheduler().runTask(this, () -> {
+                        configManager.reloadConfigs();
+                        loadBiomes();
+                    });
                 }
             }
-        }
-
-        getLogger().info("📊 已加载 " + biomes.size() + " 个生物群系配置");
+        }, 3, 3, TimeUnit.SECONDS);
     }
 
-    public void saveBiomeConfig() {
-        try {
-            biomeConfig.save(biomeFile);
-        } catch (IOException e) {
-            getLogger().severe("❌ 保存生物群系配置文件时出错: " + e.getMessage());
+    public void loadBiomes() {
+        biomes.clear();
+        if (configManager.getBiomeConfig().getConfigurationSection("biomes") != null) {
+            for (String biome : configManager.getBiomeConfig().getConfigurationSection("biomes").getKeys(false)) {
+                String biomeName = configManager.getBiomeConfig().getString("biomes." + biome);
+                if (biomeName != null) {
+                    biomes.put(biome.toUpperCase(), org.bukkit.ChatColor.translateAlternateColorCodes('&', biomeName));
+                }
+            }
         }
     }
 
@@ -155,30 +159,52 @@ public final class FXChat extends JavaPlugin implements Listener {
     public void onChat(AsyncPlayerChatEvent event) {
         if (event.isCancelled()) return;
 
+        if (isFolia) {
+            handleFoliaChat(event);
+        } else {
+            handlePaperChat(event);
+        }
+    }
+
+    private void handlePaperChat(AsyncPlayerChatEvent event) {
+        event.setCancelled(true);
         Player player = event.getPlayer();
         String message = event.getMessage();
 
+        messageExecutor.submit(() -> {
+            String formatted = formatMessage(player, message);
+            // Paper: 在主线程中广播，使用 Bukkit API
+            getServer().getScheduler().runTask(this, () -> {
+                Bukkit.broadcastMessage(formatted);
+            });
+        });
+    }
+
+    private void handleFoliaChat(AsyncPlayerChatEvent event) {
         event.setCancelled(true);
+        Player player = event.getPlayer();
+        String message = event.getMessage();
 
-        String formatted = formatMessage(player, message);
-
-        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-            onlinePlayer.sendMessage(formatted);
-        }
-
-        Bukkit.getConsoleSender().sendMessage(formatted);
+        messageExecutor.submit(() -> {
+            String formatted = formatMessage(player, message);
+            // Folia: 直接在异步线程中广播给玩家
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                onlinePlayer.sendMessage(formatted);
+            }
+            // 控制台也需要消息
+            Bukkit.getConsoleSender().sendMessage(formatted);
+        });
     }
 
     private String formatMessage(Player player, String message) {
-        String result = chatFormat
+        String result = configManager.getChatFormat()
                 .replace("%player_name%", player.getDisplayName())
                 .replace("%message%", message);
 
         if (placeholderAPIEnabled) {
             result = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, result);
         }
-
-        result = ChatColor.translateAlternateColorCodes('&', result);
+        result = org.bukkit.ChatColor.translateAlternateColorCodes('&', result);
         return result;
     }
 
@@ -186,12 +212,15 @@ public final class FXChat extends JavaPlugin implements Listener {
         if (biomeKey == null) {
             return "§c未知区域";
         }
-
         String result = biomes.get(biomeKey.toUpperCase());
         if (result == null) {
             return "§7" + biomeKey.toLowerCase().replace("_", " ");
         }
         return result;
+    }
+
+    public ConfigManager getConfigManager() {
+        return configManager;
     }
 
     public boolean isPlaceholderAPIEnabled() {
@@ -205,9 +234,5 @@ public final class FXChat extends JavaPlugin implements Listener {
     public String getPluginInfo() {
         return "§bfXChat §fv" + getPluginMeta().getVersion() +
                 " §7(核心: " + (isFolia ? "Folia" : "Paper") + ")";
-    }
-
-    public FileConfiguration getBiomeConfig() {
-        return biomeConfig;
     }
 }

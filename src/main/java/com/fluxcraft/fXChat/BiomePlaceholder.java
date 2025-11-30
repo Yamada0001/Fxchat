@@ -8,7 +8,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -36,8 +35,8 @@ public class BiomePlaceholder extends PlaceholderExpansion {
 
     @Override
     public String onPlaceholderRequest(Player player, @NotNull String params) {
-        if (player == null) {
-            return "§c玩家不存在";
+        if (player == null || !player.isOnline()) {
+            return "§c玩家离线";
         }
 
         // 处理 %flux_qx% 占位符
@@ -53,6 +52,11 @@ public class BiomePlaceholder extends PlaceholderExpansion {
      * 兼容 Folia 和 Paper 核心
      */
     private String getPlayerBiome(Player player) {
+        // 先检查玩家是否在线
+        if (!player.isOnline()) {
+            return "§c玩家离线";
+        }
+
         if (plugin.isFolia()) {
             // Folia 核心专用处理
             return getPlayerBiomeFolia(player);
@@ -66,13 +70,24 @@ public class BiomePlaceholder extends PlaceholderExpansion {
      * Folia 核心的生物群系获取方法
      */
     private String getPlayerBiomeFolia(Player player) {
+        // 保存玩家UUID和位置快照，避免竞态条件
+        final String playerName = player.getName();
+        final java.util.UUID playerUuid = player.getUniqueId();
+
         try {
             CompletableFuture<String> future = new CompletableFuture<>();
 
             // 在 Folia 中使用区域调度器
             Bukkit.getRegionScheduler().execute(plugin, player.getLocation(), () -> {
                 try {
-                    Location location = player.getLocation();
+                    // 再次检查玩家是否在线
+                    Player currentPlayer = Bukkit.getPlayer(playerUuid);
+                    if (currentPlayer == null || !currentPlayer.isOnline()) {
+                        future.complete("§c玩家离线");
+                        return;
+                    }
+
+                    Location location = currentPlayer.getLocation();
                     if (location == null || !location.isWorldLoaded()) {
                         future.complete("§c世界未加载");
                         return;
@@ -100,7 +115,7 @@ public class BiomePlaceholder extends PlaceholderExpansion {
         } catch (TimeoutException e) {
             plugin.getLogger().warning("⏰ Folia: 获取生物群系超时");
             return "§c请求超时";
-        } catch (InterruptedException | ExecutionException e) {
+        } catch (Exception e) {
             plugin.getLogger().warning("⚡ Folia: 处理生物群系请求时出现异常: " + e.getMessage());
             return "§c系统错误";
         }
@@ -110,11 +125,21 @@ public class BiomePlaceholder extends PlaceholderExpansion {
      * Paper 核心的生物群系获取方法
      */
     private String getPlayerBiomePaper(Player player) {
+        // 保存玩家UUID，避免竞态条件
+        final String playerName = player.getName();
+        final java.util.UUID playerUuid = player.getUniqueId();
+
         try {
             // 在 Paper 中使用同步任务
             String biomeName = Bukkit.getScheduler().callSyncMethod(plugin, () -> {
                 try {
-                    Location location = player.getLocation();
+                    // 再次检查玩家是否在线
+                    Player currentPlayer = Bukkit.getPlayer(playerUuid);
+                    if (currentPlayer == null || !currentPlayer.isOnline()) {
+                        return "§c玩家离线";
+                    }
+
+                    Location location = currentPlayer.getLocation();
                     if (location == null || !location.isWorldLoaded()) {
                         return "§c世界未加载";
                     }
@@ -138,7 +163,7 @@ public class BiomePlaceholder extends PlaceholderExpansion {
         } catch (TimeoutException e) {
             plugin.getLogger().warning("⏰ Paper: 获取生物群系超时");
             return "§c请求超时";
-        } catch (InterruptedException | ExecutionException e) {
+        } catch (Exception e) {
             plugin.getLogger().warning("⚡ Paper: 处理生物群系请求时出现异常: " + e.getMessage());
             return "§c系统错误";
         }
