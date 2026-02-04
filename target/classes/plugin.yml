@@ -1,8 +1,8 @@
-name: ${plugin.name}
-version: ${plugin.display.version}
-main: ${plugin.main}
-api-version: ${api.version}
-author: ${plugin.author}
+name: FxChat
+version: 1.1.1
+main: com.fluxcraft.fXChat.FXChat
+api-version: 1.21
+author: FxChat
 description: 高级聊天格式插件，支持PAPI变量和Folia/Paper核心
 folia-supported: true
 

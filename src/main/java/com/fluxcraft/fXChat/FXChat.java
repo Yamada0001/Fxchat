@@ -1,5 +1,12 @@
 package com.fluxcraft.fXChat;
 
+import com.fluxcraft.fXChat.feature.BiomeManager;
+import com.fluxcraft.fXChat.scheduler.SchedulerAdapter;
+import com.fluxcraft.fXChat.util.FileWatcher;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -10,229 +17,137 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
-import org.bstats.bukkit.Metrics;
-import org.bstats.charts.SimplePie;
-import org.bstats.charts.SingleLineChart;
 
 public final class FXChat extends JavaPlugin implements Listener {
+
+    private SchedulerAdapter scheduler;
+    private BiomeManager biomeManager;
+    private ConfigManager configManager;
+    private FileWatcher fileWatcher;
+
+    private static final LegacyComponentSerializer HEX_SERIALIZER = LegacyComponentSerializer.builder()
+            .character('&')
+            .hexColors()
+            .useUnusualXRepeatedCharacterHexFormat()
+            .build();
+
     private final Map<String, String> biomes = new ConcurrentHashMap<>();
     private boolean placeholderAPIEnabled;
-    private boolean isFolia = false;
     private Metrics metrics;
-    private ExecutorService messageExecutor;
-    private ScheduledExecutorService autoReloadExecutor;
-    private ConfigManager configManager;
-    private long lastConfigModified;
-    private long lastBiomeModified;
 
     @Override
     public void onEnable() {
-        isFolia = detectFolia();
-        messageExecutor = Executors.newFixedThreadPool(2);
-        configManager = new ConfigManager(this);
-        configManager.loadConfigs();
-        loadBiomes();
-        startAutoReloadTimer();
+        this.scheduler = SchedulerAdapter.create(this);
+        this.configManager = new ConfigManager(this);
+        this.configManager.loadConfigs();
 
-        if (configManager.isUseBstats()) {
-            initializeMetrics();
+        loadBiomes();
+        this.biomeManager = new BiomeManager(this, scheduler);
+        this.biomeManager.startAutoUpdate();
+
+        getServer().getPluginManager().registerEvents(this, this);
+        getCommand("fluxchat").setExecutor(new ReloadCommand(this));
+
+        if (configManager.isAutoReload()) {
+            // ✅ 修复：使用 Lambda 表达式传入参数 true
+            this.fileWatcher = new FileWatcher(() -> handleAutoReload(true));
+
+            this.fileWatcher.watchFile(new File(getDataFolder(), "config.yml"));
+            this.fileWatcher.watchFile(new File(getDataFolder(), "biome.yml"));
+            this.fileWatcher.start(configManager.getAutoReloadInterval());
+            getLogger().info("👁️ 文件变化自动侦测已启动 (间隔: " + configManager.getAutoReloadInterval() + "s)");
         }
+
+        if (configManager.isUseBstats()) initializeMetrics();
 
         placeholderAPIEnabled = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
         if (placeholderAPIEnabled) {
-            new BiomePlaceholder(this).register();
+            new BiomePlaceholder(this, biomeManager).register();
         }
 
-        getCommand("fluxchat").setExecutor(new ReloadCommand(this));
-        getCommand("fluxchat").setTabCompleter(new ReloadCommand(this));
-        Bukkit.getPluginManager().registerEvents(this, this);
+        if (configManager.isUsePlayerHead() && ObjectMinecraft.isObjectTextSupported()) {
+            getLogger().info("🗨️ 玩家头像功能已启用");
+        }
 
-        getLogger().info("🎉 fXChat 插件已成功启用 - 核心类型: " + (isFolia ? "Folia" : "Paper"));
+        getLogger().info("🎉 fXChat 启用成功 - 调度器: " + scheduler.getClass().getSimpleName());
     }
 
     @Override
     public void onDisable() {
-        if (messageExecutor != null) {
-            messageExecutor.shutdown();
-        }
-        if (autoReloadExecutor != null) {
-            autoReloadExecutor.shutdown();
-        }
-        getLogger().info("👋 fXChat 插件已禁用");
-    }
-
-    private void initializeMetrics() {
-        try {
-            int pluginId = 27914;
-            metrics = new Metrics(this, pluginId);
-            addCustomCharts();
-        } catch (Exception e) {
-            getLogger().severe("📊 bStats 统计初始化失败: " + e.getMessage());
-        }
-    }
-
-    private void addCustomCharts() {
-        if (metrics == null) return;
-        metrics.addCustomChart(new SimplePie("server_core", () -> isFolia ? "Folia" : "Paper"));
-        metrics.addCustomChart(new SimplePie("placeholderapi_enabled", () -> placeholderAPIEnabled ? "已启用" : "未启用"));
-        metrics.addCustomChart(new SingleLineChart("biome_config_count", () -> biomes.size()));
-        metrics.addCustomChart(new SimplePie("server_version", () -> {
-            String version = Bukkit.getVersion();
-            if (version.contains("1.21")) return "1.21.x";
-            if (version.contains("1.20")) return "1.20.x";
-            return "其他版本";
-        }));
-        metrics.addCustomChart(new SimplePie("online_players_range", () -> {
-            int online = Bukkit.getOnlinePlayers().size();
-            if (online == 0) return "0";
-            if (online <= 10) return "1-10";
-            if (online <= 50) return "11-50";
-            if (online <= 100) return "51-100";
-            return "100+";
-        }));
-    }
-
-    private boolean detectFolia() {
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
-    }
-
-    private void startAutoReloadTimer() {
-        File configFile = new File(getDataFolder(), "config.yml");
-        File biomeFile = new File(getDataFolder(), "biome.yml");
-        lastConfigModified = configFile.lastModified();
-        lastBiomeModified = biomeFile.lastModified();
-
-        autoReloadExecutor = Executors.newSingleThreadScheduledExecutor();
-        autoReloadExecutor.scheduleAtFixedRate(() -> {
-            long currentConfigModified = configFile.lastModified();
-            long currentBiomeModified = biomeFile.lastModified();
-            boolean needsReload = false;
-
-            if (currentConfigModified > lastConfigModified) {
-                lastConfigModified = currentConfigModified;
-                needsReload = true;
-            }
-            if (currentBiomeModified > lastBiomeModified) {
-                lastBiomeModified = currentBiomeModified;
-                needsReload = true;
-            }
-
-            if (needsReload) {
-                if (isFolia) {
-                    getServer().getGlobalRegionScheduler().run(this, scheduledTask -> {
-                        configManager.reloadConfigs();
-                        loadBiomes();
-                    });
-                } else {
-                    getServer().getScheduler().runTask(this, () -> {
-                        configManager.reloadConfigs();
-                        loadBiomes();
-                    });
-                }
-            }
-        }, 3, 3, TimeUnit.SECONDS);
-    }
-
-    public void loadBiomes() {
-        biomes.clear();
-        if (configManager.getBiomeConfig().getConfigurationSection("biomes") != null) {
-            for (String biome : configManager.getBiomeConfig().getConfigurationSection("biomes").getKeys(false)) {
-                String biomeName = configManager.getBiomeConfig().getString("biomes." + biome);
-                if (biomeName != null) {
-                    biomes.put(biome.toUpperCase(), org.bukkit.ChatColor.translateAlternateColorCodes('&', biomeName));
-                }
-            }
-        }
+        if (fileWatcher != null) fileWatcher.stop();
+        if (biomeManager != null) biomeManager.close();
+        scheduler.close();
+        getLogger().info("👋 fXChat 已禁用");
     }
 
     @EventHandler
     public void onChat(AsyncPlayerChatEvent event) {
         if (event.isCancelled()) return;
-
-        if (isFolia) {
-            handleFoliaChat(event);
-        } else {
-            handlePaperChat(event);
-        }
-    }
-
-    private void handlePaperChat(AsyncPlayerChatEvent event) {
         event.setCancelled(true);
         Player player = event.getPlayer();
-        String message = event.getMessage();
-
-        messageExecutor.submit(() -> {
-            String formatted = formatMessage(player, message);
-            // Paper: 在主线程中广播，使用 Bukkit API
-            getServer().getScheduler().runTask(this, () -> {
-                Bukkit.broadcastMessage(formatted);
-            });
-        });
+        Component formatted = formatMessageToComponent(player, event.getMessage());
+        scheduler.runGlobal(() -> Bukkit.getServer().broadcast(formatted));
     }
 
-    private void handleFoliaChat(AsyncPlayerChatEvent event) {
-        event.setCancelled(true);
-        Player player = event.getPlayer();
-        String message = event.getMessage();
+    private Component formatMessageToComponent(Player player, String message) {
+        boolean useHead = configManager.isUsePlayerHead() && ObjectMinecraft.isObjectTextSupported();
+        String format = configManager.getChatFormat();
+        String headPlaceholder = configManager.getHeadPlaceholder();
 
-        messageExecutor.submit(() -> {
-            String formatted = formatMessage(player, message);
-            // Folia: 直接在异步线程中广播给玩家
-            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                onlinePlayer.sendMessage(formatted);
-            }
-            // 控制台也需要消息
-            Bukkit.getConsoleSender().sendMessage(formatted);
-        });
-    }
-
-    private String formatMessage(Player player, String message) {
-        String result = configManager.getChatFormat()
+        String result = format
                 .replace("%player_name%", player.getDisplayName())
                 .replace("%message%", message);
 
         if (placeholderAPIEnabled) {
             result = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(player, result);
         }
-        result = org.bukkit.ChatColor.translateAlternateColorCodes('&', result);
-        return result;
+
+        result = result.replace(headPlaceholder, useHead ? ObjectMinecraft.getHeadPlaceholder() : "");
+
+        return ObjectMinecraft.parseMessageWithHeadAndColors(result, player, useHead, HEX_SERIALIZER);
     }
 
-    public String getBiomeName(String biomeKey) {
-        if (biomeKey == null) {
-            return "§c未知区域";
+    public void handleAutoReload(boolean isAuto) {
+        scheduler.runGlobal(() -> {
+            if (isAuto) {
+                getLogger().info("🔄 检测到配置文件变更，正在后台重载...");
+            } else {
+                getLogger().info("🔄 管理员手动触发了重载...");
+            }
+
+            configManager.loadConfigs();
+            loadBiomes();
+            biomeManager.clearCache();
+        });
+    }
+
+    public void loadBiomes() {
+        biomes.clear();
+        var section = configManager.getBiomeConfig().getConfigurationSection("biomes");
+        if (section != null) {
+            for (String key : section.getKeys(false)) {
+                String name = section.getString(key);
+                if (name != null) {
+                    biomes.put(key.toUpperCase(), org.bukkit.ChatColor.translateAlternateColorCodes('&', name));
+                }
+            }
         }
-        String result = biomes.get(biomeKey.toUpperCase());
-        if (result == null) {
-            return "§7" + biomeKey.toLowerCase().replace("_", " ");
-        }
-        return result;
     }
 
-    public ConfigManager getConfigManager() {
-        return configManager;
+    public String getBiomeName(String key) {
+        if (key == null) return "§c未知";
+        return biomes.getOrDefault(key.toUpperCase(), "§7" + key.toLowerCase().replace("_", " "));
     }
 
-    public boolean isPlaceholderAPIEnabled() {
-        return placeholderAPIEnabled;
-    }
+    public ConfigManager getConfigManager() { return configManager; }
+    public boolean isPlaceholderAPIEnabled() { return placeholderAPIEnabled; }
 
-    public boolean isFolia() {
-        return isFolia;
-    }
-
-    public String getPluginInfo() {
-        return "§bfXChat §fv" + getPluginMeta().getVersion() +
-                " §7(核心: " + (isFolia ? "Folia" : "Paper") + ")";
+    private void initializeMetrics() {
+        try {
+            metrics = new Metrics(this, 27914);
+            metrics.addCustomChart(new SimplePie("server_core", () ->
+                    scheduler instanceof com.fluxcraft.fXChat.scheduler.FoliaScheduler ? "Folia" : "Paper"
+            ));
+        } catch (Exception ignored) {}
     }
 }
