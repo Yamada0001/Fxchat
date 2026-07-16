@@ -3,15 +3,18 @@ package com.fluxcraft.fXChat;
 import com.fluxcraft.fXChat.feature.BiomeManager;
 import com.fluxcraft.fXChat.scheduler.SchedulerAdapter;
 import com.fluxcraft.fXChat.util.FileWatcher;
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -31,9 +34,10 @@ public final class FXChat extends JavaPlugin implements Listener {
             .useUnusualXRepeatedCharacterHexFormat()
             .build();
 
+    private static final LegacyComponentSerializer LEGACY_SECTION = LegacyComponentSerializer.legacySection();
+
     private final Map<String, String> biomes = new ConcurrentHashMap<>();
     private boolean placeholderAPIEnabled;
-    private Metrics metrics;
 
     @Override
     public void onEnable() {
@@ -46,10 +50,15 @@ public final class FXChat extends JavaPlugin implements Listener {
         this.biomeManager.startAutoUpdate();
 
         getServer().getPluginManager().registerEvents(this, this);
-        getCommand("fluxchat").setExecutor(new ReloadCommand(this));
+
+        PluginCommand command = getCommand("fluxchat");
+        if (command != null) {
+            command.setExecutor(new ReloadCommand(this));
+        } else {
+            getLogger().warning("无法注册命令 fluxchat，请检查 plugin.yml 配置");
+        }
 
         if (configManager.isAutoReload()) {
-            // ✅ 修复：使用 Lambda 表达式传入参数 true
             this.fileWatcher = new FileWatcher(() -> handleAutoReload(true));
 
             this.fileWatcher.watchFile(new File(getDataFolder(), "config.yml"));
@@ -81,11 +90,12 @@ public final class FXChat extends JavaPlugin implements Listener {
     }
 
     @EventHandler
-    public void onChat(AsyncPlayerChatEvent event) {
+    public void onChat(AsyncChatEvent event) {
         if (event.isCancelled()) return;
         event.setCancelled(true);
         Player player = event.getPlayer();
-        Component formatted = formatMessageToComponent(player, event.getMessage());
+        String message = PlainTextComponentSerializer.plainText().serialize(event.originalMessage());
+        Component formatted = formatMessageToComponent(player, message);
         scheduler.runGlobal(() -> Bukkit.getServer().broadcast(formatted));
     }
 
@@ -94,8 +104,10 @@ public final class FXChat extends JavaPlugin implements Listener {
         String format = configManager.getChatFormat();
         String headPlaceholder = configManager.getHeadPlaceholder();
 
+        String displayName = LEGACY_SECTION.serialize(player.displayName());
+
         String result = format
-                .replace("%player_name%", player.getDisplayName())
+                .replace("%player_name%", displayName)
                 .replace("%message%", message);
 
         if (placeholderAPIEnabled) {
@@ -128,23 +140,36 @@ public final class FXChat extends JavaPlugin implements Listener {
             for (String key : section.getKeys(false)) {
                 String name = section.getString(key);
                 if (name != null) {
-                    biomes.put(key.toUpperCase(), org.bukkit.ChatColor.translateAlternateColorCodes('&', name));
+                    biomes.put(key.toUpperCase(), translateColorCodes(name));
                 }
             }
         }
     }
 
-    public String getBiomeName(String key) {
+    private static String translateColorCodes(String input) {
+        return LegacyComponentSerializer.legacySection().serialize(
+                LegacyComponentSerializer.legacy('&').deserialize(input)
+        );
+    }
+
+    public String getBiomeName(NamespacedKey key) {
         if (key == null) return "§c未知";
-        return biomes.getOrDefault(key.toUpperCase(), "§7" + key.toLowerCase().replace("_", " "));
+        String pathKey = key.getKey().toUpperCase();
+        // 先尝试仅路径名（兼容原版 biome.yml 配置）
+        String name = biomes.get(pathKey);
+        if (name != null) return name;
+        // 再尝试完整 命名空间:路径（支持非原版/数据包生物群系）
+        name = biomes.get(key.toString().toUpperCase());
+        if (name != null) return name;
+        // 回退：将下划线替换为空格的可读格式
+        return "§7" + pathKey.toLowerCase().replace("_", " ");
     }
 
     public ConfigManager getConfigManager() { return configManager; }
-    public boolean isPlaceholderAPIEnabled() { return placeholderAPIEnabled; }
 
     private void initializeMetrics() {
         try {
-            metrics = new Metrics(this, 27914);
+            Metrics metrics = new Metrics(this, 27914);
             metrics.addCustomChart(new SimplePie("server_core", () ->
                     scheduler instanceof com.fluxcraft.fXChat.scheduler.FoliaScheduler ? "Folia" : "Paper"
             ));

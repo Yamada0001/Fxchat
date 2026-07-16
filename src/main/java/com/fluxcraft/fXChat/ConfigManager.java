@@ -1,6 +1,6 @@
 package com.fluxcraft.fXChat;
 
-import org.bukkit.ChatColor;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -10,7 +10,6 @@ public class ConfigManager {
 
     private String chatFormat;
     private boolean useBstats;
-    private boolean useBukkitApi;
     private boolean usePlayerHead;
     private String headPlaceholder;
     private boolean autoReload;
@@ -26,9 +25,8 @@ public class ConfigManager {
         plugin.reloadConfig();
         FileConfiguration config = plugin.getConfig();
 
-        this.chatFormat = ChatColor.translateAlternateColorCodes('&', config.getString("chat-format", "<%player_name%> %message%"));
+        this.chatFormat = translateColorCodes(config.getString("chat-format", "<%player_name%> %message%"));
         this.useBstats = config.getBoolean("use-bstats", true);
-        this.useBukkitApi = config.getBoolean("use-bukkit-api", true);
         this.usePlayerHead = config.getBoolean("use-player-head", false);
         this.headPlaceholder = config.getString("head-placeholder", "%player_head%");
         this.autoReload = config.getBoolean("auto-reload-enabled", false);
@@ -42,9 +40,15 @@ public class ConfigManager {
             plugin.getLogger().warning("无法加载 biome.yml");
         }
     }
+
+    private static String translateColorCodes(String input) {
+        return LegacyComponentSerializer.legacySection().serialize(
+                LegacyComponentSerializer.legacy('&').deserialize(input)
+        );
+    }
+
     public String getChatFormat() { return chatFormat; }
     public boolean isUseBstats() { return useBstats; }
-    public boolean isUseBukkitApi() { return useBukkitApi; }
     public boolean isUsePlayerHead() { return usePlayerHead; }
     public boolean isAutoReload() { return autoReload; }
     public int getAutoReloadInterval() { return autoReloadInterval; }

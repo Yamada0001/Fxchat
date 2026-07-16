@@ -7,10 +7,12 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 public final class ObjectMinecraft {
 
+    private static final Logger LOGGER = Logger.getLogger("FXChat");
     private static final MinecraftVersion SUPPORTED_VERSION = new MinecraftVersion(1, 21, 9);
     private static Boolean isSupportedVersion = null;
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
@@ -21,25 +23,26 @@ public final class ObjectMinecraft {
         }
 
         try {
-            String versionString = Bukkit.getBukkitVersion();
+            // Paper 26.2+: 使用 Minecraft 版本号替代 Bukkit 版本号，适配新版本号方案
+            String versionString = Bukkit.getMinecraftVersion();
             var matcher = VERSION_PATTERN.matcher(versionString);
 
             if (matcher.find()) {
                 int major = Integer.parseInt(matcher.group(1));
                 int minor = Integer.parseInt(matcher.group(2));
-                int patch = matcher.group(3) != null ? Integer.parseInt(matcher.group(3)) : 0; // 处理 null
+                int patch = matcher.group(3) != null ? Integer.parseInt(matcher.group(3)) : 0;
 
                 MinecraftVersion current = new MinecraftVersion(major, minor, patch);
                 isSupportedVersion = current.compareTo(SUPPORTED_VERSION) >= 0;
 
                 if (isSupportedVersion) {
-                    Bukkit.getLogger().fine("[FXChat] 检测到版本 " + major + "." + minor + "." + patch + " - 头像功能已启用");
+                    LOGGER.fine("[FXChat] 检测到版本 " + major + "." + minor + "." + patch + " - 头像功能已启用");
                 }
 
                 return isSupportedVersion;
             }
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[FXChat] 解析服务器版本失败: " + e.getMessage());
+            LOGGER.warning("[FXChat] 解析服务器版本失败: " + e.getMessage());
         }
 
         isSupportedVersion = false;
@@ -89,25 +92,19 @@ public final class ObjectMinecraft {
                 .build();
 
         return Component.text()
-                .append(createHeadContent(player))
+                .append(createHeadContent())
                 .hoverEvent(hoverText)
                 .clickEvent(net.kyori.adventure.text.event.ClickEvent.copyToClipboard(player.getName()))
                 .build();
     }
 
-    private static Component createHeadContent(Player player) {
+    private static Component createHeadContent() {
         return Component.text()
-                .append(Component.text("🗨️", TextColor.color(0xF5E050)))
+                .append(Component.text("\uD83D\uDDE8️", TextColor.color(0xF5E050)))
                 .build();
     }
 
-    private static class MinecraftVersion implements Comparable<MinecraftVersion> {
-        final int major, minor, patch;
-
-        MinecraftVersion(int major, int minor, int patch) {
-            this.major = major; this.minor = minor; this.patch = patch;
-        }
-
+    private record MinecraftVersion(int major, int minor, int patch) implements Comparable<MinecraftVersion> {
         @Override
         public int compareTo(MinecraftVersion other) {
             if (this.major != other.major) return this.major - other.major;

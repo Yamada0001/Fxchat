@@ -4,6 +4,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.jspecify.annotations.NonNull;
 
 import java.util.Arrays;
 import java.util.List;
@@ -16,7 +17,7 @@ public class ReloadCommand implements CommandExecutor, TabCompleter {
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+    public boolean onCommand(@NonNull CommandSender sender, @NonNull Command cmd, @NonNull String label, String[] args) {
         if (args.length == 0) {
             sendHelp(sender, label);
             return true;
@@ -38,12 +39,12 @@ public class ReloadCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendHelp(CommandSender sender, String label) {
-        sender.sendMessage("§6/fxchat reload");
-        sender.sendMessage("§6/fxchat info");
+        sender.sendMessage("§6/" + label + " reload");
+        sender.sendMessage("§6/" + label + " info");
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+    public List<String> onTabComplete(@NonNull CommandSender sender, @NonNull Command command, @NonNull String alias, String[] args) {
         return args.length == 1 ? Arrays.asList("reload", "info") : null;
     }
 }

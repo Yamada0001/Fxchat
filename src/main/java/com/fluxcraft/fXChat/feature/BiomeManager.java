@@ -4,6 +4,7 @@ import com.fluxcraft.fXChat.FXChat;
 import com.fluxcraft.fXChat.scheduler.SchedulerAdapter;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 
 import java.util.Map;
@@ -67,11 +68,12 @@ public class BiomeManager {
         scheduler.runRegion(loc, () -> {
             if (!player.isOnline()) return;
             Location cur = player.getLocation();
-            if (cur == null || !cur.isWorldLoaded()) return;
+            if (!cur.isWorldLoaded()) return;
 
             try {
-                String key = cur.getBlock().getBiome().name();
-                String name = plugin.getBiomeName(key);
+                // Paper 26.2+: Biome 改为 OldEnum 接口，使用 NamespacedKey 获取键名
+                NamespacedKey biomeKey = cur.getBlock().getBiome().getKey();
+                String name = plugin.getBiomeName(biomeKey);
                 biomeCache.put(player.getUniqueId(), name);
             } catch (Exception ignored) {}
         });

@@ -1,134 +1,142 @@
-# fXChat - 极致的轻量化聊天插件 💬
+# FxChat
 
-> ⚡ **专为现代 Minecraft 服务器设计的轻量级聊天插件**
-> 🎯 **简单配置 · 极致性能 · 全面兼容**
+高级 Minecraft 聊天格式插件，基于 Paper 26.2 API，支持 PlaceholderAPI 变量、生物群系占位符、玩家头像渲染，兼容 Paper 与 Folia 核心。
 
----
+## 功能特性
 
-## ✨ 核心特性
+- **聊天格式化**：自定义聊天消息格式，支持 `&` 颜色代码和十六进制颜色 (`&#RRGGBB`)
+- **PlaceholderAPI 集成**：支持所有 PAPI 变量（`%player_name%`、`%player_ping%`、`%statistic_time_played%` 等）
+- **生物群系占位符**：实时显示玩家当前所在生物群系的中文名称
+- **玩家头像渲染**：在聊天消息中显示玩家头像（需服务端资源包支持 `\uE000` 字符）
+- **Folia 兼容**：通过调度器抽象层自动适配 Paper / Folia 核心
+- **配置热更新**：自动侦测配置文件变更，无需重启服务器
+- **bStats 统计**：匿名收集服务器核心类型数据（可关闭）
 
-| 特性 | 描述 | 状态 |
-|------|------|------|
-| 🚀 **极致轻量化** | 代码精简，资源占用极低 | ✅ |
-| 🎨 **PAPI 变量支持** | 完整支持 PlaceholderAPI 所有变量 | ✅ |
-| 🔄 **热重载功能** | `/fxc reload` 实时更新配置 | ✅ |
-| 🌍 **生物群系检测** | 自带 `%flux_qx%` 生物群系变量 | ✅ |
-| ⚡ **多核心兼容** | 完美支持 Folia & Paper 等核心 | ✅ |
-| 🎯 **简单配置** | 极简配置文件，小白也能轻松上手 | ✅ |
+## 环境要求
 
----
+| 项目 | 要求 |
+|------|------|
+| 服务端 | Paper 26.2+（或 Folia 对应版本） |
+| Java | 21+ |
+| 前置插件 | PlaceholderAPI（可选，推荐安装） |
 
-## 🛠️ 快速开始
+## 安装说明
 
-### 📥 前置要求
-```bash
-# 安装 PlaceholderAPI 扩展
+1. 从 [Releases](../../releases) 下载最新 `FxChat-3.jar`
+2. 将 JAR 文件放入服务端的 `plugins/` 目录
+3. 启动服务器，插件会自动生成默认配置文件
+4. 根据需要编辑 `plugins/FxChat/config.yml` 和 `plugins/FxChat/biome.yml`
+
+## 快速开始
+
+### 基础配置
+
+编辑 `config.yml` 设置聊天格式：
+
+```yaml
+# 聊天消息格式
+# 可用变量：
+#   %player_name%  - 玩家显示名
+#   %message%      - 发送的消息
+#   %flux_qx%      - 生物群系名称（来自 biome.yml）
+#   %player_head%  - 玩家头像占位符（需开启 use-player-head）
+#   以及所有 PlaceholderAPI 支持的变量
+chat-format: '[&e%player_ping%ms %flux_qx%&f &d%statistic_time_played:hours%h&f]%player_name%&6>>&f%message%'
+
+# 是否启用玩家头像功能（需 1.21.9+ 及资源包支持）
+use-player-head: false
+
+# 头像占位符标识
+head-placeholder: "%player_head%"
+```
+
+### 推荐的 PlaceholderAPI 扩展
+
+```
 /papi ecloud download Player
 /papi ecloud download Server
 /papi ecloud download Statistic
 /papi reload
 ```
 
-### ⚙️ 基础配置
-```yaml
-# config.yml - 主配置文件
-chat-format: "&7[&6%player_name%&7] &f%message%"
+### 生物群系配置
 
-# biome.yml - 生物群系配置文件
+`biome.yml` 存储生物群系键名到中文名称的映射。插件已内置原版全部生物群系（含 Paper 26.2 新增的 `SULFUR_CAVES` 硫磺洞穴）。
+
+自定义生物群系示例（支持数据包/模组添加的非原版群系）：
+
+```yaml
 biomes:
   PLAINS: "&a平原"
-  FOREST: "&2森林"
-  DESERT: "&e沙漠"
-  OCEAN: "&1海洋"
+  SULFUR_CAVES: "&6硫磺洞穴"
+  # 数据包自定义群系（使用 命名空间:路径 格式）
+  MYMOD:CUSTOM_BIOME: "&b自定义群系"
 ```
 
----
+## 命令与权限
 
-## 🎮 命令与权限
+| 命令 | 别名 | 权限 | 说明 |
+|------|------|------|------|
+| `/fluxchat reload` | `/fxchat reload`、`/fxc reload` | `fxchat.reload` | 重载配置文件（默认：OP） |
+| `/fluxchat info` | `/fxchat info`、`/fxc info` | `fxchat.info` | 查看插件版本信息（默认：所有人） |
 
-| 命令 | 权限 | 描述 |
-|------|------|------|
-| `/fxc reload` | `fxchat.reload` | 重载插件配置 |
-| `/fxc info` | `fxchat.info` | 查看插件信息 |
+## 配置项参考
 
----
+### config.yml
 
-### 🎨 聊天格式示例
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `use-bstats` | `true` | 是否启用 bStats 匿名统计 |
+| `use-player-head` | `false` | 是否启用玩家头像渲染 |
+| `head-placeholder` | `%player_head%` | 头像占位符标识 |
+| `chat-format` | 见上文 | 聊天消息格式模板 |
+| `auto-reload-enabled` | `true` | 是否启用配置文件热更新 |
+| `auto-reload-interval` | `3` | 热更新检测间隔（秒） |
+| `biome-update-interval` | `2` | 生物群系缓存刷新间隔（秒） |
+
+## 项目结构
+
 ```
-⚡ 当前延迟: 49ms  🌍 所在群系: 平原  ⏰ 在线: 12.5小时
-[玩家名] 这里是聊天内容...
+src/main/java/com/fluxcraft/fXChat/
+├── FXChat.java              # 主插件类，事件监听与消息格式化
+├── ConfigManager.java       # 配置文件加载与管理
+├── ObjectMinecraft.java     # 玩家头像渲染与版本检测
+├── BiomePlaceholder.java    # PlaceholderAPI 占位符扩展
+├── ReloadCommand.java       # 命令处理器
+├── feature/
+│   └── BiomeManager.java    # 生物群系缓存与自动更新
+├── scheduler/
+│   ├── SchedulerAdapter.java  # 调度器抽象接口
+│   ├── PaperScheduler.java    # Paper 核心调度实现
+│   └── FoliaScheduler.java    # Folia 核心调度实现
+└── util/
+    └── FileWatcher.java       # 配置文件变更侦测工具
 ```
 
-### 🌟 特色占位符
-- `%flux_qx%` - 智能生物群系显示
-- `%player_name%` - 玩家名称
-- `%message%` - 聊天内容
-- 支持所有 PAPI 变量！
+## 构建说明
 
----
-
-## 🔧 技术优势
-
-### 🏗️ 架构设计
-```java
-// 多核心智能适配
-if (isFolia) {
-    // Folia 区域调度器
-    Bukkit.getRegionScheduler().execute(...);
-} else {
-    // Paper 同步调度器
-    Bukkit.getScheduler().callSyncMethod(...);
-}
+```bash
+mvn clean package
 ```
 
-### ⚡ 性能表现
-- 🚀 **启动时间**: < 100ms
-- 💾 **内存占用**: < 5MB
-- ⏱️ **处理延迟**: < 3ms/消息
+构建产物位于 `target/FxChat-3.jar`。
 
----
+### 技术栈
 
-## 🌈 为什么选择 fXChat？
+- **Paper API**: `26.2.build.60-beta`
+- **Java**: 21
+- **Adventure API**: 用于文本组件处理（Component）
+- **Maven Shade Plugin**: 依赖打包与重定位
 
-### 🆚 与传统插件对比
+## Folia 兼容说明
 
-| 功能 | fXChat | 传统插件 |
-|------|--------|----------|
-| 配置复杂度 | ⭐ | ⭐⭐⭐⭐⭐ |
-| Folia 支持 | ✅ | ❌ |
-| 启动速度 | ⚡ 极快 | 🐢 较慢 |
-| 资源占用 | 💾 极低 | 📈 较高 |
-| 学习曲线 | 📚 简单 | 🎓 复杂 |
+插件通过 `SchedulerAdapter` 抽象层自动检测并适配服务端核心：
 
----
+- **Paper 核心**：使用 `Bukkit.getScheduler()` 进行任务调度
+- **Folia 核心**：使用 `RegionizedServer` 的区域/全局调度器
 
-## 🎯 适用场景
+> 注意：在 Folia 环境下，生物群系自动轮询功能会被禁用（防止跨区域访问导致崩溃），占位符可能显示为「计算中...」。
 
-- 🏠 **大型服务器** - 轻量不卡顿
-- 🏢 **大型网络** - 高性能稳定运行
-- 🔧 **技术服** - 完美兼容 Folia
-- 🎨 **主题服** - 灵活自定义格式
-- ⚡ **高性能服** - 极致优化体验
+## 许可证
 
----
-
-## 📝 版本信息
-
-- **支持核心**: Paper Folia等分支
-- **依赖插件**: PlaceholderAPI
-
----
-
-> 💫 **还在为复杂的聊天插件配置而烦恼吗？**
-> 🎉 **fXChat 让聊天美化变得如此简单！**
-> 
-> ⚡ **立即体验，感受极致的轻量化魅力！**
-
----
-
-*✨ 为现代 Minecraft 服务器而生*
-
-效果图
-![草原](png/1.png)
-
-![房屋](png/2.png)
+详见项目根目录 LICENSE 文件。
